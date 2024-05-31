@@ -1,0 +1,234 @@
+
+# Import required libraries
+import osmnx as ox
+import matplotlib.pyplot as plt
+import traci
+from shapely.geometry import Point
+from matplotlib.animation import FuncAnimation
+from matplotlib.patches import Rectangle, Polygon
+import matplotlib.transforms as transforms
+import numpy as np
+from shapely.geometry import LineString, Polygon
+from matplotlib.lines import Line2D
+from matplotlib.patches import Polygon as MatPolygon
+import pyproj
+from shapely.affinity import rotate, translate
+
+# Define projection transformers for geographic coordinate conversions
+proj_from = pyproj.Proj('epsg:4326')   # Source projection: WGS 84
+proj_to = pyproj.Proj('epsg:32632')  # Target projection: UTM zone 32N
+
+# Create a transformer object for converting coordinates between projections
+project = pyproj.Transformer.from_proj(proj_from, proj_to, always_xy=True).transform
+
+def convert_simulation_coordinates(x, y):
+    """
+    Converts simulation coordinates to UTM (EPSG:32632).
+
+    Args:  
+    x, y: Simulation coordinates (longitude, latitude in EPSG:4326).
+
+    Returns: 
+    Tuple of converted coordinates in EPSG:32632.
+    """
+    # First convert simulation coordinates (x, y) to geographic coordinates (longitude, latitude)
+    lon, lat = traci.simulation.convertGeo(x, y)
+    # Then reproject the geographic coordinates to the desired EPSG:32632
+    x_32632, y_32632 = project(lon, lat)
+    return x_32632, y_32632
+
+# Initialize the SUMO simulation
+sumoCmd = ["sumo", "-c", r'C:/Users/soumy/Sumo/2024-01-06-16-13-31/osm.sumocfg']
+traci.start(sumoCmd)
+
+# Define the area of interest in Munich, Germany and project to EPSG:32632
+north, south, east, west = 48.148928, 48.147728, 11.566342, 11.564542
+bbox = (north, south, east, west)
+
+# Generate a graph from OpenStreetMap data within the specified bounding box
+G = ox.graph_from_bbox(bbox=bbox, network_type='all')
+
+# Retrieve building features within the bounding box
+buildings = ox.features_from_bbox(bbox=bbox, tags={'building': True})
+
+# Project the graph and building geometries to the target projection
+G_proj = ox.project_graph(G, to_crs="EPSG:32632")
+buildings_proj = buildings.to_crs("EPSG:32632")
+
+# Visualization setup
+fig, ax = plt.subplots(figsize=(12, 8))
+
+# Plot the projected graph and buildings without edges or nodes for simplicity
+ox.plot_graph(G_proj, ax=ax, bgcolor='none', edge_color='none', node_size=0, show=False, close=False)
+buildings_proj.plot(ax=ax, facecolor='khaki', edgecolor='brown', alpha=0.7)
+
+# Initialize empty lists to hold vehicle patches, ray lines, and visibility polygons for visualization
+vehicle_patches = []
+ray_lines = []  
+visibility_polygons = []  
+    
+def vehicle_attributes(vehicle_type):
+    """Returns shape, color, and size based on vehicle type."""
+    if vehicle_type == "autonomous_vehicle":
+        return Rectangle, 'black', (1.8, 4.5)
+    if vehicle_type == "veh_passenger":
+        return Rectangle, 'blue', (1.8, 4.5)
+    elif vehicle_type == "pt_bus":
+        return Rectangle, 'red', (2.5, 12)
+    elif vehicle_type == "pt_tram":
+        return Rectangle, 'purple', (2.5, 12)  # Example dimensions for tram
+    elif vehicle_type == "truck_truck":  
+        return Rectangle, 'green', (2.5, 10)  
+    elif vehicle_type == "bike_bicycle":
+        return Rectangle, 'brown', (0.7, 1.8)  
+    elif vehicle_type == "ped_pedestrian":
+        return Rectangle, 'yellow', (1, 1)  
+    else:  # Default for unknown types
+        return Rectangle, 'gray', (2, 5) 
+
+def generate_rays(center, num_rays=360, radius=30):
+    """Generate rays emanating from a center point."""
+    angles = np.linspace(0, 2 * np.pi, num_rays, endpoint=False)
+    rays = [(center, (center[0] + np.cos(angle) * radius, center[1] + np.sin(angle) * radius)) for angle in angles]
+    return rays
+ 
+def detect_intersections(ray, objects):
+    """
+    Detects intersections of a ray with objects and returns points of intersection or ray end if no intersection.
+    """
+    intersections = []
+    ray_line = LineString(ray)  # Convert ray to a LineString for intersection checks
+    for obj in objects:
+        if ray_line.intersects(obj):
+            intersection_point = ray_line.intersection(obj)
+            if intersection_point.is_empty:
+                continue
+            
+            # Check if the intersection result is a multi-part geometry
+            if "Multi" in intersection_point.geom_type:
+                # For multi-part geometries, iterate over each part using .geoms
+                for part in intersection_point.geoms:
+                    if hasattr(part, 'coords'):
+                        intersections.extend(part.coords)
+            else:
+                # For single-part geometries, directly access coordinates
+                if hasattr(intersection_point, 'coords'):
+                    intersections.extend(intersection_point.coords)
+                    
+            break  # Assuming we stop at the first intersection for simplicity
+
+    return intersections
+
+def create_vehicle_polygon(x, y, width, length, angle):
+    """Creates a rectangle representing the vehicle's position and orientation."""
+    # Create the rectangle centered at (0, 0)
+    adjusted_angle = (-angle) % 360  # Adjust based on your earlier findings and coordinate system
+    rect = Polygon([(-width / 2, -length / 2), (-width / 2, length / 2),
+                    (width / 2, length / 2), (width / 2, -length / 2)])
+    # Rotate and translate the rectangle to match the vehicle's orientation and position
+    rotated_rect = rotate(rect, adjusted_angle, use_radians=False, origin=(0, 0))
+    translated_rect = translate(rotated_rect, xoff=x, yoff=y)
+    return translated_rect
+
+
+def update_with_ray_tracing(frame):
+    global vehicle_patches, ray_lines, visibility_polygons # Declare ray_lines as global here
+    detected_color = (1.0, 0.27, 0, 0.5)  # Red-Orange with 50% transparency for detected rays
+    undetected_color = (0.53, 0.81, 0.98, 0.5)  # Light Sky Blue with 50% transparency for undetected rays
+    traci.simulationStep()
+
+    new_vehicle_patches = []
+    new_ray_lines = []  # Temporary storage for the current frame's rays
+    
+    # Static and dynamic objects
+    static_objects = [building.geometry for building in buildings_proj.itertuples()]
+       
+    # Clear existing rays before drawing new ones
+    for line in ray_lines:
+            line.remove()
+    ray_lines.clear()  # Clear the list after removing the lines from the plot
+
+    for polygon in visibility_polygons:  # Remove existing visibility polygons
+        polygon.remove()
+    visibility_polygons.clear()  # Clear the list after removing polygons
+
+    for vehicle_id in traci.vehicle.getIDList():
+        vehicle_type = traci.vehicle.getTypeID(vehicle_id)
+        Shape, edgecolor, (width, length) = vehicle_attributes(vehicle_type)
+        # Corrected: Convert positions of other vehicles for dynamic object geometry
+        dynamic_objects_geom = [
+            create_vehicle_polygon(
+               *convert_simulation_coordinates(*traci.vehicle.getPosition(vid)),  # Convert and unpack position to x, y
+               *vehicle_attributes(traci.vehicle.getTypeID(vid))[2],  # Unpack width and length from attributes
+                traci.vehicle.getAngle(vid)  # Get the vehicle orientation
+            ) for vid in traci.vehicle.getIDList() if vid != vehicle_id  # Exclude the current vehicle
+        ]
+
+        # Direct conversion to EPSG:32632
+        x, y = traci.vehicle.getPosition(vehicle_id)
+        x_32632, y_32632 = convert_simulation_coordinates(x, y)
+        angle = traci.vehicle.getAngle(vehicle_id)
+        adjusted_angle = (-angle) % 360  # Adjust the angle in the same way as for the detection polygons
+        # Adjust angle from SUMO convention to standard geometric convention if necessary
+        
+        # Create vehicle patch and apply transformations
+        lower_left_corner = (x_32632 - width / 2, y_32632 - length / 2)
+        patch = Rectangle(lower_left_corner, width, length, edgecolor=edgecolor, fill=None)
+        
+        t = transforms.Affine2D().rotate_deg_around(x_32632, y_32632, adjusted_angle) + ax.transData
+        patch.set_transform(t)
+        new_vehicle_patches.append(patch)
+       
+        # Perform ray tracing only for the autonomous vehicle
+        if vehicle_type == "autonomous_vehicle":
+            center = (x_32632, y_32632)
+            rays = generate_rays(center, num_rays=360, radius=30)
+            all_objects = static_objects + dynamic_objects_geom
+            ray_endpoints = []
+
+            for ray in rays:
+                closest_intersection = None
+                min_distance = float('inf')
+                
+                for obj in all_objects:
+                    intersections = detect_intersections(ray, [obj])
+                    for intersection in intersections:
+                        distance = Point(ray[0]).distance(Point(intersection))
+                        if distance < min_distance and distance <= 30:  # Ensure within 30 meters
+                            min_distance = distance
+                            closest_intersection = intersection
+
+                # Draw the ray up to the closest intersection or full length if no intersection
+                if closest_intersection:
+                    end_point = closest_intersection
+                    ray_color = detected_color
+                else:
+                    angle = np.arctan2(ray[1][1] - ray[0][1], ray[1][0] - ray[0][0])
+                    end_point = (ray[0][0] + np.cos(angle) * 30, ray[0][1] + np.sin(angle) * 30)
+                    ray_color = undetected_color
+
+                ray_endpoints.append(end_point)  # Collect all endpoints or intersection points
+                ray_line = Line2D([ray[0][0], end_point[0]], [ray[0][1], end_point[1]], color=ray_color, linewidth=1)
+                ax.add_line(ray_line)
+                new_ray_lines.append(ray_line)
+
+            # Create and draw the polygon from ray endpoints
+            if len(ray_endpoints) > 2:  # A polygon needs at least 3 points
+                visibility_polygon = MatPolygon(ray_endpoints, color='black', alpha=0.5, fill=None)
+                ax.add_patch(visibility_polygon) 
+                visibility_polygons.append(visibility_polygon)  # Store the new polygon for later removal   
+    
+    for patch in vehicle_patches:
+        patch.remove()
+    
+    vehicle_patches = new_vehicle_patches
+    ray_lines = new_ray_lines
+
+    for patch in vehicle_patches:
+        ax.add_patch(patch)
+
+ani = FuncAnimation(fig, update_with_ray_tracing, frames=range(1, 1000), interval=33, repeat=False)
+
+plt.show()
+traci.close()
+
