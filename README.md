@@ -78,6 +78,7 @@ The script creates a real-time visualization of the simulation, displaying:
  - The map and buildings in the area of interest.
  - Vehicles and their movements.
  - Rays emanating from the autonomous vehicle, indicating obstacle detection.
+ - Either first intersection point or second intersection point for dynamic objects
    
 ![Visualization with first intersection](https://github.com/Soumya1496/AV-Perception-modelling-using-SUMO-Python/blob/main/frame_0187.png)
 
