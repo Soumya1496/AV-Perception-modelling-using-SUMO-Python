@@ -79,7 +79,7 @@ The script creates a real-time visualization of the simulation, displaying:
  - Vehicles and their movements.
  - Rays emanating from the autonomous vehicle, indicating obstacle detection.
    
-![Visualization with first intersection](C:\Users\soumy\Documents\Study_PROJECT\pic_report)
+![Visualization with first intersection](https://github.com/Soumya1496/AV-Perception-modelling-using-SUMO-Python/blob/main/frame_0187.png)
 
 
 ## License
