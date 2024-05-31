@@ -82,6 +82,7 @@ The script creates a real-time visualization of the simulation, displaying:
    
 ![Visualization with first intersection](https://github.com/Soumya1496/AV-Perception-modelling-using-SUMO-Python/blob/main/frame_0187.png)
 
+![Visualization with second intersection](https://github.com/Soumya1496/AV-Perception-modelling-using-SUMO-Python/blob/main/frame1_0187.png)
 
 ## License
 
