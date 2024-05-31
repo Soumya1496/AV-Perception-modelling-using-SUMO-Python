@@ -1,5 +1,5 @@
 # Autonomous Vehicle Ray Tracing Simulation
-This repository contains a Python script that performs ray tracing for an autonomous vehicle within a SUMO simulation. The simulation area is focused on a region in Munich, Germany. The script uses various libraries to integrate SUMO, OpenStreetMap, and ray tracing visualization.
+This repository contains a Python script that performs ray tracing for an autonomous vehicle within a SUMO simulation. The simulation area is focused on a region in Munich, Germany. The script uses various libraries to integrate SUMO, OpenStreetMap, and ray tracing visualization. During ray tracing detection it divides all objects in two categories i.e., static and dynamic objects.
 
 ## Features
 
@@ -17,7 +17,6 @@ To run this script, you need to have the following libraries installed:
 
 - `osmnx`
 - `matplotlib`
-- `geopandas`
 - `traci`
 - `shapely`
 - `numpy`
@@ -32,7 +31,7 @@ Additionally, you need to have SUMO (Simulation of Urban MObility) installed. Yo
 
 ## Usage
 
-1. Setup SUMO Configuration: Ensure you have a SUMO configuration file ('osm.sumocfg') set up in your desired location. Update the path to this configuration file in the script.
+1. Setup SUMO Configuration: Ensure you have a SUMO configuration file ('osm.sumocfg') set up in your desired location using latitude and longitude. Update the path to this configuration file in the script.
 
 2. Run the Script: Execute the script to start the simulation and visualization.
 
@@ -79,6 +78,9 @@ The script creates a real-time visualization of the simulation, displaying:
  - The map and buildings in the area of interest.
  - Vehicles and their movements.
  - Rays emanating from the autonomous vehicle, indicating obstacle detection.
+   
+![Visualization with first intersection](C:\Users\soumy\Documents\Study_PROJECT\pic_report)
+
 
 ## License
 
